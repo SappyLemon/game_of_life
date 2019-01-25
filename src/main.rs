@@ -1,76 +1,120 @@
+extern crate glutin_window;
+extern crate graphics;
+extern crate opengl_graphics;
+extern crate piston;
+
+use glutin_window::GlutinWindow as Window;
+use opengl_graphics::{GlGraphics, OpenGL};
+use piston::event_loop::*;
+use piston::input::*;
+use piston::window::WindowSettings;
+
 fn main() {
-    use std::fs;
-    let filename = "/home/nils/Desktop/map4.txt";
-    let contents = fs::read_to_string(filename).expect("Something went wrong reading the file");
-    let result: Vec<_> = contents.lines().collect();
-    let width = result[0].parse::<usize>().unwrap();
-    let height = result[1].parse::<usize>().unwrap();
-    println!("width: {}, height: {}", width, height);
-    let mut fields: Vec<Vec<bool>> = vec![vec![false; height]; width];
-    for index in 2..result.len() - 3 {
-        let mut row = result[index].to_string();
-        row.retain(|c| c != ' ');
-        for (i, item) in row.chars().enumerate() {
-            fields[i][index] = item == '1';
+    use game_objects::*;
+    let filename = "/home/nils/Desktop/map3.txt";
+    let map = Map::from_file(filename.to_string());
+
+    let opengl = OpenGL::V3_2;
+
+    // Create an Glutin window.
+    let mut window: Window = WindowSettings::new("Game of Life", [400, 400])
+        .opengl(opengl)
+        .exit_on_esc(true)
+        .build()
+        .unwrap();
+
+    // Create a new game and run it.
+    let mut app = App {
+        gl: GlGraphics::new(opengl),
+        map: map,
+    };
+
+    let mut events = Events::new(EventSettings::new());
+    while let Some(e) = events.next(&mut window) {
+        if let Some(r) = e.render_args() {
+            app.render(&r);
         }
+
+        if let Some(u) = e.update_args() {
+            app.update(&u);
+        }
+        use std::{thread, time};
+
+        let wait_time = time::Duration::from_millis(10);
+        thread::sleep(wait_time);
     }
-    let map = game_objects::Map::from(width, height, fields);
-    game_loop(map);
 }
 
-fn game_loop(mut map: game_objects::Map) {
-    loop {
+pub struct App {
+    gl: GlGraphics, // OpenGL drawing backend.
+    map: crate::game_objects::Map,
+}
+
+impl App {
+    fn render(&mut self, args: &RenderArgs) {
+        use graphics::*;
+        use vecmath::*;
+
+        let map = &self.map;
+
+        const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+        const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+
+        let step_x = args.width / map.width as f64;
+        let step_y = args.height / map.height as f64;
+
+        let vec2: Vector2<f64> = [step_x, step_y];
+        let scalar = vec2_len(vec2);
+
+        let mut rectangles: Vec<([f64; 4], [f32; 4])> = Vec::new();
+
         for index_x in 0..map.width {
             for index_y in 0..map.height {
-                let mut cell_opt = map.get_cell(index_x, index_y);
+                if let Some(cell) = map.get_cell(index_x, index_y) {
+                    let x = step_x * index_x as f64;
+                    let y = step_y * index_y as f64;
 
-                if let Some(ref mut cell) = cell_opt {
+                    let rect = rectangle::square(x, y, scalar);
+                    let color = if cell.is_alive { RED } else { GREEN };
+
+                    rectangles.push((rect, color));
+                }
+            }
+        }
+
+        self.gl.draw(args.viewport(), |c, gl| {
+            // Clear the screen.
+            clear(GREEN, gl);
+
+            let transform = c.transform.trans(-25.0, -25.0);
+
+            for (rect, color) in rectangles {
+                rectangle(color, rect, transform, gl);
+            }
+        });
+    }
+
+    fn update(&mut self, _args: &UpdateArgs) {
+        let map = &mut self.map;
+
+        for index_x in 0..map.width {
+            for index_y in 0..map.height {
+                if let Some(ref mut cell) = map.get_cell_mut(index_x, index_y) {
                     cell.is_alive = cell.is_alive_next;
                 }
             }
         }
+
         for index_x in 0..map.width {
             for index_y in 0..map.height {
-                let count = map.count_living_neighbours(index_x, index_y);
-                let mut cell_opt = map.get_cell(index_x, index_y);
+                let count = map.count_living_neighbours(index_x as i32, index_y as i32);
 
-                if let Some(ref mut cell) = cell_opt {
+                if let Some(ref mut cell) = map.get_cell_mut(index_x, index_y) {
                     cell.calculate_next_round(count);
                 }
             }
         }
-
-        use std::{thread, time};
-
-        let wait_time = time::Duration::from_secs(1);
-        thread::sleep(wait_time);
-        render(&mut map);
     }
-}
-
-fn render(map: &mut game_objects::Map) {
-    // use std::io;
-    use std::ops::Add;
-    let mut buffer = String::new();
-    for index_x in 0..map.width {
-        let mut temp = String::new();
-        for index_y in 0..map.height {
-            let cell_opt = map.get_cell(index_x, index_y);
-            if let Some(cell) = cell_opt {
-                if cell.is_alive {
-                    temp = temp.add("#");
-                } else {
-                    temp = temp.add(" ");
-                }
-            } else {
-                temp = temp.add(" ");
-            }
-        }
-        buffer = buffer.add(&temp);
-        buffer = buffer.add("\n");
-    }
-    std::process::Command::new("clear");
-    print!("{}", buffer);
 }
 
 mod game_objects {
@@ -84,10 +128,6 @@ mod game_objects {
         pub is_alive: bool,
         pub is_alive_next: bool,
     }
-    pub struct Point {
-        pub x: i32,
-        pub y: i32,
-    }
 
     impl Clone for Cell {
         fn clone(&self) -> Cell {
@@ -97,29 +137,40 @@ mod game_objects {
             }
         }
     }
+
     impl Cell {
         pub fn calculate_next_round(&mut self, neighours: i32) {
             if self.is_alive {
-                if neighours > 2 && neighours < 4 {
-                    self.is_alive_next = true;
-                } else {
-                    self.is_alive_next = false;
-                }
-            } else if neighours == 3 {
-                self.is_alive_next = true;
+                self.is_alive_next = neighours >= 2 && neighours < 4;
             } else {
-                self.is_alive_next = false;
+                self.is_alive_next = neighours == 3;
             }
         }
     }
 
-    impl Point {
-        pub fn new(x_pos: i32, y_pos: i32) -> Point {
-            Point { x: x_pos, y: y_pos }
-        }
-    }
-
     impl Map {
+        pub fn from_file(path: String) -> Map {
+            use std::fs;
+            let contents = fs::read_to_string(path).expect("Something went wrong reading the file");
+
+            let result: Vec<_> = contents.lines().collect();
+            let width = result[0].parse::<usize>().unwrap();
+            let height = result[1].parse::<usize>().unwrap();
+
+            println!("width: {}, height: {}", width, height);
+
+            let mut fields: Vec<Vec<bool>> = vec![vec![false; height]; width];
+
+            for index in 2..result.len() - 2 {
+                let mut row = result[index].to_string();
+                row.retain(|c| c != ' '); // strip out blanks used for formatting
+                for (i, item) in row.chars().enumerate() {
+                    fields[index][i] = item == '1';
+                }
+            }
+            Map::from(width, height, fields)
+        }
+
         pub fn from(width: usize, height: usize, field_values: Vec<Vec<bool>>) -> Map {
             let mut fields: Vec<Vec<Cell>> = vec![
                 vec![
@@ -146,33 +197,52 @@ mod game_objects {
             }
         }
 
-        pub fn get_cell(&mut self, x: usize, y: usize) -> Option<&mut Cell> {
+        pub fn get_cell_mut(&mut self, x: usize, y: usize) -> Option<&mut Cell> {
             if x < self.width && y < self.height {
                 return Some(&mut self.fields[x][y]);
             }
             None
         }
 
-        pub fn count_living_neighbours(&self, x: usize, y: usize) -> i32 {
-            let mut counter = 0;
-            let low_x = if x == 0 { 0 } else { x - 1 };
-            let low_y = if y == 0 { 0 } else { y - 1 };
+        pub fn get_cell(&self, x: usize, y: usize) -> Option<&Cell> {
+            if x < self.width && y < self.height {
+                return Some(&self.fields[x][y]);
+            }
+            None
+        }
 
-            for index_x in low_x..x + 2 {
-                if index_x >= self.width {
-                    return counter;
-                }
-                for index_y in low_y..y + 2 {
-                    if index_y >= self.height {
-                        break;
+        pub fn count_living_neighbours(&self, x: i32, y: i32) -> i32 {
+            let mut counter = 0;
+            let width = self.width as i32;
+            let height = self.height as i32;
+
+            for counter_x in x - 1..x + 2 {
+                let index_x = Map::get_map_bounds(counter_x, width);
+
+                for counter_y in y - 1..y + 2 {
+                    if counter_x == x && counter_y == y {
+                        continue;
                     }
-                    let cell = &self.fields[index_x as usize][index_y as usize];
+
+                    let index_y = Map::get_map_bounds(counter_y, height);
+
+                    let cell = &self.fields[index_x][index_y];
                     if cell.is_alive {
                         counter += 1;
                     }
                 }
             }
             counter
+        }
+
+        fn get_map_bounds(counter: i32, dim: i32) -> usize {
+            if counter < 0 {
+                (counter + dim) as usize
+            } else if counter >= dim {
+                (counter - dim) as usize
+            } else {
+                counter as usize
+            }
         }
     }
 }
