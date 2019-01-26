@@ -8,10 +8,30 @@ use opengl_graphics::{GlGraphics, OpenGL};
 use piston::event_loop::*;
 use piston::input::*;
 use piston::window::WindowSettings;
+use std::env;
 
 fn main() {
     use game_objects::*;
-    let filename = "/home/nils/Desktop/map3.txt";
+
+    let args: Vec<String> = env::args().collect();
+
+    let filename = if args.len() > 1 as usize {
+        (&args[1]).to_string()
+    } else {
+        "maps.txt".to_string()
+    };
+    let fps: u32 = if args.len() > 2 as usize {
+        let i = match args[2].parse::<u32>() {
+            Ok(i) => i,
+            _ => 30,
+        };
+        i
+    } else {
+        30
+    };
+
+    println!("filename: {} fps: {}", filename, fps);
+
     let map = Map::from_file(filename.to_string());
 
     let opengl = OpenGL::V3_2;
@@ -29,19 +49,33 @@ fn main() {
         map: map,
     };
 
+    use std::{thread, time};
     let mut events = Events::new(EventSettings::new());
     while let Some(e) = events.next(&mut window) {
+        let t = time::SystemTime::now();
+
         if let Some(r) = e.render_args() {
             app.render(&r);
+        }
+
+        if fps == 0 {
+            continue;
         }
 
         if let Some(u) = e.update_args() {
             app.update(&u);
         }
-        use std::{thread, time};
 
-        let wait_time = time::Duration::from_millis(10);
-        thread::sleep(wait_time);
+        if let Ok(d) = time::SystemTime::now().duration_since(t) {
+            let wait_time = time::Duration::from_secs(1) / fps;
+            let wait_time = if wait_time <= d {
+                time::Duration::from_nanos(0)
+            } else {
+                wait_time - d
+            };
+            println!("Wait time: {:?}", wait_time);
+            thread::sleep(wait_time);
+        }
     }
 }
 
@@ -57,13 +91,13 @@ impl App {
 
         let map = &self.map;
 
-        const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-        const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+        const GREEN: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+        const RED: [f32; 4] = [0.0, 0.0, 1.0, 0.5];
 
         let step_x = args.width / map.width as f64;
         let step_y = args.height / map.height as f64;
 
-        let vec2: Vector2<f64> = [step_x, step_y];
+        let vec2: Vector2<f64> = [step_y, step_x];
         let scalar = vec2_len(vec2);
 
         let mut rectangles: Vec<([f64; 4], [f32; 4])> = Vec::new();
@@ -86,7 +120,7 @@ impl App {
             // Clear the screen.
             clear(GREEN, gl);
 
-            let transform = c.transform.trans(-25.0, -25.0);
+            let transform = c.transform;
 
             for (rect, color) in rectangles {
                 rectangle(color, rect, transform, gl);
@@ -161,12 +195,14 @@ mod game_objects {
 
             let mut fields: Vec<Vec<bool>> = vec![vec![false; height]; width];
 
-            for index in 2..result.len() - 2 {
+            let mut field_index_x = 0;
+            for index in 2..result.len() {
                 let mut row = result[index].to_string();
                 row.retain(|c| c != ' '); // strip out blanks used for formatting
                 for (i, item) in row.chars().enumerate() {
-                    fields[index][i] = item == '1';
+                    fields[field_index_x][i] = item == '1';
                 }
+                field_index_x += 1;
             }
             Map::from(width, height, fields)
         }
