@@ -101,7 +101,7 @@ impl App {
         let map = &self.map;
 
         const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-        const GREEN: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+        const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
         let step_x = args.width / map.width as f64;
         let step_y = args.height / map.height as f64;
@@ -118,7 +118,7 @@ impl App {
                     let y = step_y * index_y as f64;
 
                     let rect = rectangle::square(x, y, scalar);
-                    let color = if cell.is_alive { RED } else { GREEN };
+                    let color = if cell.is_alive { BLUE } else { BLACK };
 
                     rectangles.push((rect, color));
                 }
@@ -127,7 +127,7 @@ impl App {
 
         self.gl.draw(args.viewport(), |c, gl| {
             // Clear the screen.
-            clear(GREEN, gl);
+            clear(BLACK, gl);
 
             let transform = c.transform;
 
