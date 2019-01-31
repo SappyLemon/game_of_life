@@ -185,8 +185,25 @@ mod game_objects {
     impl Map {
         pub fn from_file(path: String) -> Map {
             use std::fs;
-            let contents = fs::read_to_string(path).expect("Something went wrong reading the file");
-
+            use std::io::ErrorKind;
+            let original_path = path.clone();
+            let contents = fs::read_to_string(path);
+            let contents = match contents {
+                Ok(file) => file,
+                Err(error) => match error.kind() {
+                    ErrorKind::NotFound => match fs::read_to_string("map.txt") {
+                        Ok(file) => {
+                            println!(
+                                "could not find {}. Loaded {} instead",
+                                original_path, "map.txt"
+                            );
+                            file
+                        }
+                        Err(error) => panic!("Could not read map file! {}", error),
+                    },
+                    other_error => panic!("Could not read map file! {:?}", other_error),
+                },
+            };
             let result: Vec<_> = contents.lines().collect();
             let width = result[0].parse::<usize>().unwrap();
             let height = result[1].parse::<usize>().unwrap();
