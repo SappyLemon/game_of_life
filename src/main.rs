@@ -18,8 +18,9 @@ fn main() {
     let filename = if args.len() > 1 as usize {
         (&args[1]).to_string()
     } else {
-        "maps.txt".to_string()
+        "map.txt".to_string()
     };
+
     let fps: u32 = if args.len() > 2 as usize {
         let i = match args[2].parse::<u32>() {
             Ok(i) => i,
@@ -30,14 +31,14 @@ fn main() {
         30
     };
 
-    println!("filename: {} fps: {}", filename, fps);
+    println!("filename: {} fps limit: {}", filename, fps);
 
     let map = Map::from_file(filename.to_string());
 
     let opengl = OpenGL::V3_2;
 
     // Create an Glutin window.
-    let mut window: Window = WindowSettings::new("Game of Life", [400, 400])
+    let window: Window = WindowSettings::new("Game of Life", [400, 400])
         .opengl(opengl)
         .exit_on_esc(true)
         .build()
@@ -47,52 +48,60 @@ fn main() {
     let mut app = App {
         gl: GlGraphics::new(opengl),
         map: map,
+        fps_limit: fps,
     };
 
-    use std::{thread, time};
-    let mut events = Events::new(EventSettings::new());
-    while let Some(e) = events.next(&mut window) {
-        let t = time::SystemTime::now();
-
-        if let Some(r) = e.render_args() {
-            app.render(&r);
-        }
-
-        if fps == 0 {
-            continue;
-        }
-
-        if let Some(u) = e.update_args() {
-            app.update(&u);
-        }
-
-        if let Ok(d) = time::SystemTime::now().duration_since(t) {
-            let wait_time = time::Duration::from_secs(1) / fps;
-            let wait_time = if wait_time <= d {
-                time::Duration::from_nanos(0)
-            } else {
-                wait_time - d
-            };
-            println!("Wait time: {:?}", wait_time);
-            thread::sleep(wait_time);
-        }
-    }
+    app.game_loop(window);
 }
 
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
     map: crate::game_objects::Map,
+    fps_limit: u32,
 }
 
 impl App {
+    fn game_loop(self: &mut Self, mut window: Window) {
+        use std::{thread, time};
+
+        let mut events = Events::new(EventSettings::new());
+
+        while let Some(e) = events.next(&mut window) {
+            let t = time::SystemTime::now();
+
+            if let Some(r) = e.render_args() {
+                self.render(&r);
+            }
+
+            if self.fps_limit == 0 {
+                continue;
+            }
+
+            if let Some(u) = e.update_args() {
+                self.update(&u);
+            }
+
+            if let Ok(d) = time::SystemTime::now().duration_since(t) {
+                let wait_time = time::Duration::from_secs(1) / self.fps_limit;
+                let wait_time = if wait_time <= d {
+                    time::Duration::from_nanos(0)
+                } else {
+                    wait_time - d
+                };
+                println!("Wait time: {:?}", wait_time);
+                thread::sleep(wait_time);
+            }
+        }
+    }
+
     fn render(&mut self, args: &RenderArgs) {
         use graphics::*;
         use vecmath::*;
 
         let map = &self.map;
 
-        const GREEN: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
-        const RED: [f32; 4] = [0.0, 0.0, 1.0, 0.5];
+        const BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+        const GREEN: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
         let step_x = args.width / map.width as f64;
         let step_y = args.height / map.height as f64;
